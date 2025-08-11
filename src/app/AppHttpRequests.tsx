@@ -11,17 +11,41 @@ export const AppHttpRequests = () => {
   const [todolists, setTodolists] = useState<Todolist[]>([])
   const [tasks, setTasks] = useState<Record<string, DomainTask[]>>({})
 
+  // useEffect(() => {
+  //   todolistsApi.getTodolists().then((res) => {
+  //     const todolists = res.data
+  //     setTodolists(todolists)
+  //     todolists.forEach((todolist) => {
+  //       tasksApi.getTasks(todolist.id).then((res) => {
+  //         const newTask = res.data.items
+  //         setTasks({ ...tasks, [todolist.id]: newTask })
+  //       })
+  //     })
+  //   })
+  // }, [])
+
   useEffect(() => {
-    todolistsApi.getTodolists().then((res) => {
-      const todolists = res.data
-      setTodolists(todolists)
-      todolists.forEach((todolist) => {
-        tasksApi.getTasks(todolist.id).then((res) => {
-          const newTask = res.data.items
-          setTasks({ ...tasks, [todolist.id]: newTask })
+    const fetchData = async () => {
+      try {
+        const todolistsResponse = await todolistsApi.getTodolists()
+        const todolists = todolistsResponse.data
+        setTodolists(todolists)
+
+        const tasksPromises = todolists.map((todolist) => tasksApi.getTasks(todolist.id))
+        const tasksResponses = await Promise.all(tasksPromises)
+
+        const allTasks: Record<string, DomainTask[]> = {}
+        tasksResponses.forEach((res, index) => {
+          allTasks[todolists[index].id] = res.data.items
         })
-      })
-    })
+
+        setTasks(allTasks)
+      } catch (error) {
+        console.error("Ошибка при загрузке todolists и задач:", error)
+      }
+    }
+
+    fetchData()
   }, [])
 
   const createTodolist = (title: string) => {
@@ -44,11 +68,18 @@ export const AppHttpRequests = () => {
   const createTask = (todolistId: string, title: string) => {
     tasksApi.createTask({ todolistId, title }).then((res) => {
       const newTask = res.data.data.item
-      setTasks({ ...tasks, [todolistId]: [newTask, ...tasks[todolistId]] })
+      setTasks({ ...tasks, [todolistId]: [newTask, ...(tasks[todolistId] || [])] })
     })
   }
 
-  const deleteTask = (todolistId: string, taskId: string) => {}
+  const deleteTask = (todolistId: string, taskId: string) => {
+    tasksApi.deleteTask({ todolistId, taskId }).then(() => {
+      setTasks((prevTasks) => ({
+        ...prevTasks,
+        [todolistId]: prevTasks[todolistId].filter((task) => task.id !== taskId),
+      }))
+    })
+  }
 
   const changeTaskStatus = (e: ChangeEvent<HTMLInputElement>, task: any) => {
     const model: UpdateTaskModel = {
@@ -63,13 +94,34 @@ export const AppHttpRequests = () => {
       const updatedTask = res.data.data.item
       setTasks({
         ...tasks,
-        [task.todoListId]: task[task.todoListId].map((el) => (el.id === task.id ? updatedTask : el)),
+        [task.todoListId]: tasks[task.todoListId].map((el) => (el.id === task.id ? updatedTask : el)),
       })
     })
   }
 
-  const changeTaskTitle = (task: any, title: string) => {}
+  const changeTaskTitle = (task: DomainTask, title: string) => {
+    const model: UpdateTaskModel = {
+      title,
+      description: task.description,
+      deadline: task.deadline,
+      startDate: task.startDate,
+      priority: task.priority,
+      status: task.status,
+    }
 
+    tasksApi
+      .changeTask({ todolistId: task.todoListId, taskId: task.id, model })
+      .then((res) => {
+        const updatedTask = res.data.data.item
+        setTasks((prev) => ({
+          ...prev,
+          [task.todoListId]: (prev[task.todoListId] || []).map((t) => (t.id === task.id ? updatedTask : t)),
+        }))
+      })
+      .catch((err) => {
+        console.error("changeTaskTitle failed:", err)
+      })
+  }
   return (
     <div style={{ margin: "20px" }}>
       <CreateItemForm onCreateItem={createTodolist} />
